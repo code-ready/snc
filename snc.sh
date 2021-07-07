@@ -20,6 +20,7 @@ then
     MIRROR=${MIRROR:-https://github.com/openshift/okd/releases/download}
 fi
 
+SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_rsa_crc"
 INSTALL_DIR=crc-tmp-install-data
 CRC_VM_NAME=${CRC_VM_NAME:-crc}
 SNC_CLUSTER_MEMORY=${SNC_CLUSTER_MEMORY:-14336}
@@ -28,10 +29,19 @@ CRC_VM_DISK_SIZE=${CRC_VM_DISK_SIZE:-33285996544}
 BASE_DOMAIN=${CRC_BASE_DOMAIN:-testing}
 CRC_PV_DIR="/mnt/pv-data"
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_ecdsa_crc"
-SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_ecdsa_crc"
 MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp-dev-preview}
 CERT_ROTATION=${SNC_DISABLE_CERT_ROTATION:-enabled}
 HTPASSWD_FILE='users.htpasswd'
+
+MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp}
+SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_rsa_crc"
+SSH_HOST="core@api.${CRC_VM_NAME}.${BASE_DOMAIN}"
+SSH_CMD="ssh ${SSH_ARGS} ${SSH_HOST} --"
+SCP="scp ${SSH_ARGS}"
+SLEEP_TIME=180
+API_SERVER=https://${CRC_VM_NAME}.${BASE_DOMAIN}:6443
+ARCH=$(uname -m)
+PERF_TUNE_DISK_LEVEL=2
 
 run_preflight_checks
 
@@ -252,4 +262,20 @@ retry ${OC} delete pod --field-selector=status.phase==Succeeded --all-namespaces
 # Delete outdated rendered master/worker machineconfigs and just keep the latest one
 ${OC} get mc --sort-by=.metadata.creationTimestamp --no-headers -oname | grep rendered-master | head -n -1 | xargs -t ${OC} delete
 ${OC} get mc --sort-by=.metadata.creationTimestamp --no-headers -oname | grep rendered-worker | head -n -1 | xargs -t ${OC} delete
+
+# Set default route for registry CRD from false to true.
+${OC} patch config.imageregistry.operator.openshift.io/cluster --patch '{"spec":{"defaultRoute":true}}' --type=merge
+
+# Apply performance related changes to the CRC OpenShift components
+export JQ
+export YQ
+export OC
+export SSH_HOST
+export SSH_ARGS
+export SSH_CMD
+export SCP
+export API_SERVER
+export SLEEP_TIME
+export PERF_TUNE_DISK_LEVEL
+source ./tuning-crc-openshift-cluster/crc-perf-tuning.sh
 
